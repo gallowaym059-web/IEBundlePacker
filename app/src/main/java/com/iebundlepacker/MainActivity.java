@@ -45,10 +45,18 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.rgb(15,19,24));
         getWindow().setNavigationBarColor(Color.rgb(15,19,24));
         getWindow().getDecorView().setSystemUiVisibility(0);
-        if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
-        backend = Python.getInstance().getModule("iebundle_backend");
         buildUi();
         showEmptyState();
+        try {
+            if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
+            backend = Python.getInstance().getModule("iebundle_backend");
+            status.setText("Ready. UnityPy bundle support is not included in this build yet.");
+        } catch (Throwable error) {
+            backend = null;
+            status.setText("Python backend could not start. The interface is still available.");
+            android.util.Log.e("IEBundlePacker", "Python initialization failed", error);
+            toast("Backend initialization failed: " + safeMessage(error));
+        }
     }
 
     private int dp(float v) { return (int)(v * getResources().getDisplayMetrics().density + 0.5f); }
@@ -162,15 +170,24 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try { work.run(); }
             catch (Throwable e) {
-                final String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                final String msg = safeMessage(e);
                 runOnUiThread(() -> { status.setText("Operation failed"); toast(msg); });
             }
         }, "iebundle-worker").start();
     }
+    private String safeMessage(Throwable error) {
+        String message = error.getMessage();
+        return message == null || message.trim().isEmpty()
+            ? error.getClass().getSimpleName() : message;
+    }
+
     private JSONObject callJson(String method, Object... args) {
+        if (backend == null) {
+            throw new IllegalStateException("Python backend is unavailable. Check the startup status message.");
+        }
         PyObject result = backend.callAttr(method, args);
         try { return new JSONObject(result.toString()); }
-        catch (Exception e) { throw new RuntimeException("Backend returned invalid data: " + result); }
+        catch (Exception e) { throw new RuntimeException("Backend returned invalid data: " + result, e); }
     }
     private void openBundleFromUri(Uri uri) {
         runWorker("Reading bundle…", () -> {
@@ -338,4 +355,4 @@ public class MainActivity extends Activity {
         return row;
     }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-            }
+    }
