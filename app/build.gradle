@@ -1,0 +1,26 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.iebundlepacker'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.iebundlepacker'
+        minSdk 23
+        targetSdk 35
+        versionCode 2
+        versionName '0.2.0'
+        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
+    }
+}
+
+python {
+    version '3.11'
+    pip {
+        install 'UnityPy'
+        install 'Pillow'
+    }
+}
