@@ -225,6 +225,8 @@ public class MainActivity extends Activity {
             try (InputStream in = new FileInputStream(output); OutputStream out = getContentResolver().openOutputStream(destination, "wt")) {
                 if (out == null) throw new IOException("Could not write to selected destination");
                 byte[] b = new byte[64 * 1024]; int n; while ((n = in.read(b)) > 0) out.write(b, 0, n);
+            } catch (IOException e) {
+                throw new RuntimeException("Could not save bundle: " + e.getMessage(), e);
             }
             runOnUiThread(() -> { status.setText("Saved modified bundle."); toast("Bundle saved."); });
         });
@@ -238,6 +240,8 @@ public class MainActivity extends Activity {
             try (InputStream in = new FileInputStream(output); OutputStream out = getContentResolver().openOutputStream(destination, "wt")) {
                 if (out == null) throw new IOException("Could not write exported file");
                 byte[] b = new byte[64 * 1024]; int n; while ((n = in.read(b)) > 0) out.write(b, 0, n);
+            } catch (IOException e) {
+                throw new RuntimeException("Could not export asset: " + e.getMessage(), e);
             }
             runOnUiThread(() -> { status.setText("Export complete: " + pendingFileName); toast("Exported " + pendingFileName); });
         });
@@ -245,7 +249,12 @@ public class MainActivity extends Activity {
     private void replaceTextureFromUri(Uri uri) {
         final String pathId = pendingPathId;
         runWorker("Replacing texture…", () -> {
-            File png = copyUriToCache(uri, "replacement");
+            File png;
+            try {
+                png = copyUriToCache(uri, "replacement");
+            } catch (IOException e) {
+                throw new RuntimeException("Could not read replacement PNG: " + e.getMessage(), e);
+            }
             JSONObject result = callJson("replace_texture", sessionId, pathId, png.getAbsolutePath());
             if (!result.optBoolean("ok")) throw new RuntimeException(result.optString("message", "Replace failed"));
             runOnUiThread(() -> { status.setText(result.optString("message", "Texture replaced")); toast("Texture replaced in memory. Save As to write changes."); });
@@ -324,4 +333,4 @@ public class MainActivity extends Activity {
         return row;
     }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-          }
+    }
