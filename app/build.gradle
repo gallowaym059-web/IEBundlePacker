@@ -1,4 +1,3 @@
-
 plugins {
     id 'com.android.application'
     id 'com.chaquo.python'
@@ -12,10 +11,10 @@ android {
         applicationId 'com.iebundlepacker'
         minSdk 24
         targetSdk 35
-        versionCode 4
-        versionName '0.4.0'
+        versionCode 5
+        versionName '0.5.0'
 
-        // Android ARM32 and ARM64 only.
+        // Only Android ARM32 and ARM64 are supported.
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a'
         }
@@ -27,12 +26,11 @@ android {
     }
 }
 
+// Keep the Python runtime dependency-free at build time. UnityPy cannot be
+// installed from source by Chaquopy because its native extensions require an
+// Android-compatible prebuilt wheel/toolchain. The backend reports this clearly.
 chaquopy {
     defaultConfig {
         version = '3.11'
-
-        pip {
-            install 'Pillow'
-        }
     }
 }
