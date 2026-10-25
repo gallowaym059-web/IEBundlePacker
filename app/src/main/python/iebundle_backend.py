@@ -9,8 +9,23 @@ import os
 import traceback
 import uuid
 
-import UnityPy
-from PIL import Image
+
+
+def _load_unitypy():
+    """Load UnityPy only when bundle processing is requested.
+
+    This allows the Android UI to start even when the optional UnityPy native
+    extensions are not packaged for the current Android ABI.
+    """
+    try:
+        import UnityPy
+        return UnityPy
+    except Exception as exc:
+        raise RuntimeError(
+            "UnityPy is not available in this APK. The interface can start, "
+            "but AssetBundle operations require an Android-compatible UnityPy "
+            "package for this device. Details: " + str(exc)
+        ) from exc
 
 _SESSIONS = {}
 
@@ -41,6 +56,7 @@ def _obj_info(obj):
 
 def open_bundle(path):
     """Open a bundle from a local path and return JSON session + asset rows."""
+    UnityPy = _load_unitypy()
     env = UnityPy.load(path)
     session_id = str(uuid.uuid4())
     objects = list(env.objects)
@@ -108,6 +124,12 @@ def replace_texture(session, path_id, png_path):
     if str(obj.type.name) != "Texture2D":
         raise ValueError("Only Texture2D assets can be replaced with PNG.")
     data = obj.read()
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError(
+            "PNG replacement is unavailable in this build because Pillow is not packaged."
+        ) from exc
     with Image.open(png_path) as source:
         image = source.convert("RGBA")
     old = getattr(data, "image", None)
@@ -136,4 +158,14 @@ def close_bundle(session):
 
 
 def backend_status():
-    return _json({"ready": True, "message": "UnityPy backend loaded"})
+    try:
+        import UnityPy  # noqa: F401
+        unitypy_available = True
+        message = "UnityPy is available."
+    except Exception:
+        unitypy_available = False
+        message = (
+            "The app interface is ready, but Unity AssetBundle processing is disabled: "
+            "this APK does not include an Android-compatible UnityPy native extension."
+        )
+    return _json({"ready": True, "unitypyAvailable": unitypy_available, "message": message})
