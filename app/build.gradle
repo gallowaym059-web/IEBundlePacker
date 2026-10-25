@@ -1,3 +1,4 @@
+
 plugins {
     id 'com.android.application'
     id 'com.chaquo.python'
@@ -13,14 +14,21 @@ android {
         targetSdk 35
         versionCode 2
         versionName '0.2.0'
-        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
+
+        // Support Android ARM32 and ARM64 only.
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
     }
 }
 
-python {
-    version '3.11'
-    pip {
-        install 'UnityPy'
-        install 'Pillow'
+chaquopy {
+    defaultConfig {
+        version = '3.11'
+
+        pip {
+            install 'UnityPy'
+            install 'Pillow'
+        }
     }
 }
