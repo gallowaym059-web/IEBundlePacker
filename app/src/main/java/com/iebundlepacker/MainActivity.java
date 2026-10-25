@@ -174,7 +174,12 @@ public class MainActivity extends Activity {
     }
     private void openBundleFromUri(Uri uri) {
         runWorker("Reading bundle…", () -> {
-            File input = copyUriToCache(uri, "bundle");
+            final File input;
+            try {
+                input = copyUriToCache(uri, "bundle");
+            } catch (IOException e) {
+                throw new RuntimeException("Could not read selected bundle: " + e.getMessage(), e);
+            }
             JSONObject result = callJson("open_bundle", input.getAbsolutePath());
             if (!result.optBoolean("ok")) throw new RuntimeException(result.optString("message", "Could not open bundle"));
             JSONArray rows;
@@ -333,4 +338,4 @@ public class MainActivity extends Activity {
         return row;
     }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-    }
+            }
