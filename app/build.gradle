@@ -38,6 +38,7 @@ chaquopy {
             options('--no-deps')
             install('attrs==25.3.0')
             install('fsspec==2025.3.0')
+            install('chaquopy-libcxx') // provides libc++_shared.so, needed by Brotli/lz4/Pillow wheels
             install('Brotli==1.0.7')
             install('lz4==4.3.2')
             install('Pillow==11.0.0')
