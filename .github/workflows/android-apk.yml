@@ -93,6 +93,9 @@ jobs:
           print('ABI checks passed for armeabi-v7a and arm64-v8a.')
           PY
 
+      - name: Verify no native library dependency is missing
+        run: python scripts/check_native_deps.py app/build/outputs/apk/debug/app-debug.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
