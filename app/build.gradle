@@ -40,7 +40,12 @@ chaquopy {
             // of its desktop-only optional dependencies are pulled in.
             install('attrs==25.3.0')
             install('fsspec==2025.3.0')
-            install('chaquopy-libcxx') // libc++_shared.so (also resolved as a dependency)
+            // Native runtime libraries, listed explicitly so they are installed
+            // even if a wheel's dependency metadata does not pull them in.
+            install('chaquopy-libcxx')    // libc++_shared.so (Brotli, lz4)
+            install('chaquopy-libjpeg')   // libjpeg_chaquopy.so (Pillow)
+            install('chaquopy-libpng')    // libpng (Pillow / FreeType)
+            install('chaquopy-freetype')  // libfreetype.so (Pillow ImageFont)
             install('Brotli==1.0.7')
             install('lz4==4.3.2')
             install('Pillow==11.0.0')
