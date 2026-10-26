@@ -11,8 +11,8 @@ android {
         applicationId 'com.iebundlepacker'
         minSdk 24
         targetSdk 35
-        versionCode 5
-        versionName '0.5.0'
+        versionCode 7
+        versionName '0.7.0'
 
         // Only Android ARM32 and ARM64 are supported.
         ndk {
@@ -26,11 +26,22 @@ android {
     }
 }
 
-// Keep the Python runtime dependency-free at build time. UnityPy cannot be
-// installed from source by Chaquopy because its native extensions require an
-// Android-compatible prebuilt wheel/toolchain. The backend reports this clearly.
+// UnityPy's Python source is vendored by .github/workflows/android-apk.yml.
+// Do not pip-install UnityPy: its optional UnityPyBoost C++ extension is not
+// built for Android. The pure-Python fallback is supported by upstream.
 chaquopy {
     defaultConfig {
-        version = '3.11'
+        version = '3.11' // Required for ARM32 + ARM64 with Chaquopy.
+        pip {
+            // Install only the packages listed below. This avoids pip trying to
+            // compile UnityPy's desktop-only optional dependencies for Android.
+            options('--no-deps')
+            install('attrs==25.3.0')
+            install('fsspec==2025.3.0')
+            install('Brotli==1.0.7')
+            install('lz4==4.3.2')
+            install('Pillow==11.0.0')
+            install('typing-extensions==4.12.2')
+        }
     }
 }
