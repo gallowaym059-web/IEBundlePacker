@@ -1,35 +1,18 @@
-# Build IEBundlePacker APK with GitHub Actions (Android ARM32 + ARM64)
+# Build IEBundlePacker APK on GitHub (Android only)
 
-## 1. Create a repository
-1. Create a GitHub repository named `IEBundlePacker`.
-2. Upload the *contents* of this ZIP to the repository root, preserving folders such as `.github/workflows/` and `app/`.
-3. Commit to the `main` branch. A push to `main` starts the workflow automatically.
+1. Create or open the GitHub repository.
+2. Upload the **contents** of this project folder, including `.github/workflows/android-apk.yml`, `app/`, `build.gradle`, `settings.gradle`, and `gradle.properties`.
+3. Commit the upload to the repository's `main` branch.
+4. Open **Actions** and choose **Build Android APK**.
+5. Select **Run workflow** when available, or make a commit to trigger the workflow.
+6. Wait for the workflow to finish. If it fails, open the failed step and read its log; do not download an APK from a failed run.
+7. On a successful run, open the run page, scroll to **Artifacts**, and download `IEBundlePacker-debug-apk`.
 
-## 2. Run the build
-1. Open the repository's **Actions** tab.
-2. Select **Build Android APK**.
-3. If needed, choose **Run workflow**.
-4. Open the latest run. If it fails, open the failed `Build debug APK` step and inspect the first Gradle/Python dependency error.
+The workflow fetches UnityPy source at a pinned commit, checks syntax and backend imports on the build host, downloads Gradle 8.9, uses Python 3.11 via Chaquopy, installs Android-compatible wheels for compression/image support, builds the APK, and verifies that both `armeabi-v7a` and `arm64-v8a` native payloads exist.
 
-## 3. Download and install
-1. After a successful run, open the run's **Artifacts** section.
-2. Download `IEBundlePacker-debug-apk` and extract the artifact ZIP.
-3. Install `app-debug.apk` on an ARM Android phone. Android may ask you to allow installs from the file manager used to open it.
+## Important limitations
 
-The app is configured with `armeabi-v7a` (32-bit ARM) and `arm64-v8a` (64-bit ARM). x86 and x86_64 are intentionally excluded. The APK includes the configured ARM ABIs; it is not a promise that every third-party native dependency supports every ABI.
-
-## 4. First-run test checklist
-Use a copy of a small, non-encrypted bundle and keep the original untouched.
-1. Open the bundle and confirm the asset count populates.
-2. Search and filter for `Texture2D`.
-3. Export a texture PNG.
-4. Replace a texture with a PNG of exactly the original dimensions.
-5. Use **SAVE AS** to write a new bundle, then reopen that output.
-6. Test a Mesh OBJ export and JSON/raw export separately; some Unity versions/types may not export.
-7. Repeat on an ARM32 device/emulator and an ARM64 device if both are targets.
-
-## 5. Known limits
-- UnityPy cannot decode every texture format on every Android ABI.
-- Encrypted bundles are not supported.
-- Mesh-to-OBJ export depends on UnityPy's exporter for that mesh/version. OBJ import is not implemented.
-- This project is not a complete replacement for desktop UABEA/UABE; inspect errors and verify outputs in the target game/editor.
+- Build using this GitHub Actions workflow; it fetches the UnityPy source before Gradle runs.
+- Texture replacement writes PNG pixels as RGBA32 and does not need to decode the original texture first.
+- Some ETC/ASTC/Crunch texture PNG exports and FMOD-only audio decoding need native codecs that are not bundled. Use raw/JSON export where available or replace Texture2D assets with PNG.
+- A successful Android build does not itself prove every Unity AssetBundle is supported. Test on a copy of your actual bundle and preserve the original.
