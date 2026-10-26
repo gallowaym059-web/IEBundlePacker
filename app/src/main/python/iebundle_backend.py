@@ -6,7 +6,8 @@ from PNG, and serialize the modified environment. Encrypted bundles are unsuppor
 """
 import json
 import os
-import traceback
+
+UNITYPY_SOURCE_COMMIT = "43a8d0e014969a8b152590cd152a0e1badc3d35a"
 import uuid
 
 
@@ -14,17 +15,16 @@ import uuid
 def _load_unitypy():
     """Load UnityPy only when bundle processing is requested.
 
-    This allows the Android UI to start even when the optional UnityPy native
-    extensions are not packaged for the current Android ABI.
+    UnityPy's pure-Python source is vendored by the Android workflow. Its
+    optional UnityPyBoost accelerator may be absent; upstream has a Python fallback.
     """
     try:
         import UnityPy
         return UnityPy
     except Exception as exc:
         raise RuntimeError(
-            "UnityPy is not available in this APK. The interface can start, "
-            "but AssetBundle operations require an Android-compatible UnityPy "
-            "package for this device. Details: " + str(exc)
+            "UnityPy failed to load. Build through the included GitHub Actions workflow "
+            "so the pinned UnityPy source is added before packaging. Details: " + str(exc)
         ) from exc
 
 _SESSIONS = {}
@@ -41,7 +41,7 @@ def _object_name(obj, data):
     return f"{obj.type.name}_{obj.path_id}"
 
 
-def _obj_info(obj):
+def _obj_info(obj, handle):
     try:
         data = obj.read()
         name = _object_name(obj, data)
@@ -51,7 +51,7 @@ def _obj_info(obj):
         size = int(getattr(obj, "byte_size", 0) or 0)
     except Exception:
         size = 0
-    return {"name": name, "type": str(obj.type.name), "id": str(obj.path_id), "sizeBytes": size}
+    return {"name": name, "type": str(obj.type.name), "id": str(obj.path_id), "handle": str(handle), "sizeBytes": size}
 
 
 def open_bundle(path):
@@ -60,29 +60,48 @@ def open_bundle(path):
     env = UnityPy.load(path)
     session_id = str(uuid.uuid4())
     objects = list(env.objects)
-    _SESSIONS[session_id] = {"env": env, "path": path, "objects": {str(o.path_id): o for o in objects}}
-    rows = [_obj_info(obj) for obj in objects]
+    # path_id values are only unique within a SerializedFile. Use a session-local
+    # handle for actions while continuing to display Unity's actual path ID.
+    object_map = {}
+    rows = []
+    for index, obj in enumerate(objects):
+        handle = str(index)
+        object_map[handle] = obj
+        rows.append(_obj_info(obj, handle))
+    _SESSIONS[session_id] = {"env": env, "path": path, "objects": object_map}
     return _json({"ok": True, "session": session_id, "count": len(rows), "assets": rows,
                   "message": f"Loaded {len(rows)} objects"})
 
 
-def _get(session, path_id):
+def _get(session, handle):
     s = _SESSIONS.get(session)
     if not s:
         raise ValueError("This bundle session is no longer open. Reopen the bundle.")
-    obj = s["objects"].get(str(path_id))
+    obj = s["objects"].get(str(handle))
     if obj is None:
-        raise ValueError("Asset path ID not found")
+        raise ValueError("Asset handle not found. Reopen the bundle and try again.")
     return s, obj
 
 
-def export_asset(session, path_id, output_path, format_name):
-    s, obj = _get(session, path_id)
-    data = obj.read()
+def export_asset(session, handle, output_path, format_name):
+    s, obj = _get(session, handle)
     typ = str(obj.type.name)
     fmt = str(format_name).lower()
+
+    # Raw export must not require parsing the Unity object/type tree. This makes
+    # it the recovery path for unsupported or malformed asset types.
+    if fmt == "raw":
+        raw = obj.get_raw_data()
+        with open(output_path, "wb") as f:
+            f.write(raw)
+        return _json({"ok": True, "path": output_path, "bytes": len(raw)})
+
+    data = obj.read()
     if typ == "Texture2D" and fmt == "png":
-        image = data.image
+        try:
+            image = data.image
+        except NotImplementedError as exc:
+            raise ValueError(str(exc)) from exc
         if image is None:
             raise ValueError("UnityPy could not decode this texture format on this device.")
         image.save(output_path, format="PNG")
@@ -107,20 +126,16 @@ def export_asset(session, path_id, output_path, format_name):
         try:
             payload = obj.read_typetree()
         except Exception as e:
-            payload = {"error": str(e), "type": typ, "path_id": str(path_id)}
+            payload = {"error": str(e), "type": typ, "path_id": str(obj.path_id)}
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
-    elif fmt == "raw":
-        raw = obj.get_raw_data()
-        with open(output_path, "wb") as f:
-            f.write(raw)
     else:
         raise ValueError(f"Export format {fmt} is not supported for {typ}.")
     return _json({"ok": True, "path": output_path})
 
 
-def replace_texture(session, path_id, png_path):
-    s, obj = _get(session, path_id)
+def replace_texture(session, handle, png_path):
+    s, obj = _get(session, handle)
     if str(obj.type.name) != "Texture2D":
         raise ValueError("Only Texture2D assets can be replaced with PNG.")
     data = obj.read()
@@ -132,12 +147,29 @@ def replace_texture(session, path_id, png_path):
         ) from exc
     with Image.open(png_path) as source:
         image = source.convert("RGBA")
-    old = getattr(data, "image", None)
-    if old is not None and old.size != image.size:
-        raise ValueError(f"Image dimensions must match the original ({old.width}x{old.height}).")
-    data.image = image
+    original_width = int(getattr(data, "m_Width", 0) or 0)
+    original_height = int(getattr(data, "m_Height", 0) or 0)
+    if original_width > 0 and original_height > 0 and image.size != (original_width, original_height):
+        raise ValueError(
+            f"Image dimensions must match the original ({original_width}x{original_height}). "
+            "This prevents accidental atlas resizing and keeps references intact."
+        )
+
+    # Do not access data.image here: doing so forces a decode of the original
+    # texture, which can be ETC/ASTC/crunched and require native decoder modules.
+    # Re-encode replacement PNG pixels as Unity's uncompressed RGBA32 format.
+    # This keeps replacement functional even when the source texture uses a
+    # compressed format which this Android build cannot preview.
+    try:
+        from UnityPy.enums import TextureFormat
+        data.set_image(image, target_format=TextureFormat.RGBA32)
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not encode the replacement PNG as RGBA32. Confirm this is a "
+            "Texture2D asset and try a standard PNG. Details: " + str(exc)
+        ) from exc
     data.save()
-    return _json({"ok": True, "message": "Texture replaced in memory. Use SAVE AS to write the bundle."})
+    return _json({"ok": True, "message": "Texture replaced as RGBA32 in memory. Use SAVE AS to write the bundle."})
 
 
 def save_bundle(session, output_path):
@@ -158,14 +190,33 @@ def close_bundle(session):
 
 
 def backend_status():
+    """Report actual backend capabilities without pretending optional codecs exist."""
+    checks = {}
+    errors = []
     try:
-        import UnityPy  # noqa: F401
-        unitypy_available = True
-        message = "UnityPy is available."
-    except Exception:
-        unitypy_available = False
-        message = (
-            "The app interface is ready, but Unity AssetBundle processing is disabled: "
-            "this APK does not include an Android-compatible UnityPy native extension."
-        )
-    return _json({"ready": True, "unitypyAvailable": unitypy_available, "message": message})
+        import UnityPy
+        checks["unitypy"] = True
+        version = getattr(UnityPy, "__version__", "unknown")
+    except Exception as exc:
+        checks["unitypy"] = False
+        version = "unavailable"
+        errors.append("UnityPy import failed: " + str(exc))
+
+    for key, module_name in (("lz4", "lz4.block"), ("brotli", "brotli"), ("pillow", "PIL.Image"),
+                             ("attrs", "attrs"), ("fsspec", "fsspec")):
+        try:
+            __import__(module_name)
+            checks[key] = True
+        except Exception as exc:
+            checks[key] = False
+            errors.append(f"Missing dependency {module_name}: {exc}")
+
+    ready = bool(checks.get("unitypy")) and all(checks.get(k, False) for k in ("lz4", "brotli", "pillow", "attrs", "fsspec"))
+    message = (
+        "UnityPy core ready: bundle inspection, JSON/raw export, Save As, and PNG replacement as RGBA32 are enabled. "
+        "PNG preview/export of some ETC/ASTC/crunched formats and FMOD-only audio decoding need optional native codecs; "
+        "unsupported formats will show a specific error."
+        if ready else "AssetBundle backend is not ready. " + "; ".join(errors)
+    )
+    return _json({"ready": ready, "unitypyAvailable": bool(checks.get("unitypy")), "version": version,
+                  "dependencies": checks, "nativeTextureCodecs": False, "message": message})
