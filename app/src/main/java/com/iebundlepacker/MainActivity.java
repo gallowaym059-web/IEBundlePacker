@@ -32,12 +32,13 @@ public class MainActivity extends Activity {
     private String activeFilter = "All types";
     private String activeSort = "Name A–Z";
     private String sessionId;
+    private String backendStatusMessage = "Open a bundle to begin.";
     private String pendingPathId, pendingFormat, pendingFileName;
     private PyObject backend;
 
     static class Asset {
-        String name, type, id, size;
-        Asset(String n, String t, String i, String s) { name=n; type=t; id=i; size=s; }
+        String name, type, id, size, handle;
+        Asset(String n, String t, String i, String s, String h) { name=n; type=t; id=i; size=s; handle=h; }
     }
 
     @Override public void onCreate(Bundle state) {
@@ -50,10 +51,13 @@ public class MainActivity extends Activity {
         try {
             if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
             backend = Python.getInstance().getModule("iebundle_backend");
-            status.setText("Ready. UnityPy bundle support is not included in this build yet.");
+            JSONObject backendInfo = callJson("backend_status");
+            backendStatusMessage = backendInfo.optString("message", "Python backend initialized.");
+            status.setText(backendStatusMessage);
         } catch (Throwable error) {
             backend = null;
-            status.setText("Python backend could not start. The interface is still available.");
+            backendStatusMessage = "Python backend failed to start: " + safeMessage(error);
+            status.setText(backendStatusMessage);
             android.util.Log.e("IEBundlePacker", "Python initialization failed", error);
             toast("Backend initialization failed: " + safeMessage(error));
         }
@@ -171,7 +175,7 @@ public class MainActivity extends Activity {
             try { work.run(); }
             catch (Throwable e) {
                 final String msg = safeMessage(e);
-                runOnUiThread(() -> { status.setText("Operation failed"); toast(msg); });
+                runOnUiThread(() -> { status.setText("Operation failed: " + msg); toast(msg); });
             }
         }, "iebundle-worker").start();
     }
@@ -208,7 +212,7 @@ public class MainActivity extends Activity {
                     JSONObject row = rows.getJSONObject(n);
                     long bytes = row.optLong("sizeBytes", 0);
                     parsed.add(new Asset(row.optString("name", "Unknown"), row.optString("type", "Unknown"),
-                        row.optString("id", "0"), formatBytes(bytes)));
+                        row.optString("id", "0"), formatBytes(bytes), row.optString("handle", row.optString("id", "0"))));
                 }
                 newSession = result.getString("session");
             } catch (Exception parseError) { throw new RuntimeException("Bundle list could not be read: " + parseError.getMessage()); }
@@ -283,12 +287,12 @@ public class MainActivity extends Activity {
         });
     }
     private void requestExport(Asset a, String format, String extension, String mime) {
-        pendingPathId = a.id; pendingFormat = format; pendingFileName = a.name.replaceAll("[^A-Za-z0-9._-]", "_") + "." + extension;
+        pendingPathId = a.handle; pendingFormat = format; pendingFileName = a.name.replaceAll("[^A-Za-z0-9._-]", "_") + "." + extension;
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT); i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType(mime); i.putExtra(Intent.EXTRA_TITLE, pendingFileName); startActivityForResult(i, EXPORT_FILE);
     }
     private void requestReplace(Asset a) {
-        pendingPathId = a.id;
+        pendingPathId = a.handle;
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT); i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("image/png"); startActivityForResult(i, REPLACE_PNG);
     }
@@ -306,7 +310,8 @@ public class MainActivity extends Activity {
         else if ("Type".equals(activeSort)) Collections.sort(shown,(a,b)->a.type.compareToIgnoreCase(b.type));
         else if ("Largest first".equals(activeSort)) Collections.sort(shown,(a,b)->Long.compare(sizeBytes(b.size),sizeBytes(a.size)));
         else Collections.sort(shown,(a,b)->a.name.compareToIgnoreCase(b.name));
-        status.setText(shown.size()+" assets shown • "+assets.size()+" total");
+        if (assets.isEmpty()) status.setText(backendStatusMessage);
+        else status.setText(shown.size()+" assets shown • "+assets.size()+" total");
         if (shown.isEmpty()) {
             TextView empty=text(assets.isEmpty()?"No assets loaded yet.":"No assets match your search.",14,Color.rgb(143,153,164),false);
             pad(empty,12,20,12,20); list.addView(empty); return;
@@ -355,4 +360,4 @@ public class MainActivity extends Activity {
         return row;
     }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-    }
+                }
