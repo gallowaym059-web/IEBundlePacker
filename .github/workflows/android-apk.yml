@@ -9,9 +9,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -23,13 +28,70 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Python 3.11 is used twice: for the host-side checks below, and as the
+      # "build Python" that the Chaquopy Gradle plugin looks up on PATH.
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
+      - name: Fetch pinned UnityPy source
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNITYPY_COMMIT='43a8d0e014969a8b152590cd152a0e1badc3d35a'
+          TMP_DIR="$(mktemp -d)"
+          curl --fail --location --retry 3 \
+            "https://codeload.github.com/K0lb3/UnityPy/tar.gz/${UNITYPY_COMMIT}" \
+            --output "${TMP_DIR}/unitypy.tar.gz"
+          mkdir -p "${TMP_DIR}/src"
+          tar -xzf "${TMP_DIR}/unitypy.tar.gz" -C "${TMP_DIR}/src" --strip-components=1
+          test -f "${TMP_DIR}/src/UnityPy/__init__.py"
+          rm -rf app/src/main/python/UnityPy
+          cp -a "${TMP_DIR}/src/UnityPy" app/src/main/python/UnityPy
+          # Desktop-only FMOD libraries are not needed on Android.
+          rm -rf app/src/main/python/UnityPy/lib/FMOD
+          echo "Vendored UnityPy from commit ${UNITYPY_COMMIT}"
+          python -m compileall -q app/src/main/python
+
+      - name: Smoke-test Python backend on the build host
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check \
+            'attrs==25.3.0' 'fsspec==2025.3.0' 'Brotli==1.0.7' \
+            'lz4==4.3.2' 'Pillow==11.0.0' 'typing-extensions==4.12.2'
+          PYTHONPATH='app/src/main/python' python - <<'PY'
+          import json
+          import iebundle_backend
+          result = json.loads(iebundle_backend.backend_status())
+          print(json.dumps(result, indent=2))
+          if not result.get('ready'):
+              raise SystemExit('Python backend smoke test failed')
+          PY
+
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verify APK contains ARM32 and ARM64 libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import zipfile
+          apk = 'app/build/outputs/apk/debug/app-debug.apk'
+          with zipfile.ZipFile(apk) as z:
+              names = z.namelist()
+          for abi in ('armeabi-v7a', 'arm64-v8a'):
+              if not any(n.startswith(f'lib/{abi}/') for n in names):
+                  raise SystemExit(f'APK is missing native libraries for {abi}')
+          print('ABI checks passed for armeabi-v7a and arm64-v8a.')
+          PY
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
