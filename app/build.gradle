@@ -33,12 +33,14 @@ chaquopy {
     defaultConfig {
         version = '3.11' // Required for ARM32 + ARM64 with Chaquopy.
         pip {
-            // Install only the packages listed below. This avoids pip trying to
-            // compile UnityPy's desktop-only optional dependencies for Android.
-            options('--no-deps')
+            // Do NOT use --no-deps here. Chaquopy's native wheels (Pillow, lz4,
+            // Brotli) declare the Android shared libraries they need (libjpeg,
+            // libpng, freetype, libc++_shared, ...) as dependencies, so pip must
+            // resolve them. UnityPy itself is vendored, not pip-installed, so none
+            // of its desktop-only optional dependencies are pulled in.
             install('attrs==25.3.0')
             install('fsspec==2025.3.0')
-            install('chaquopy-libcxx') // provides libc++_shared.so, needed by Brotli/lz4/Pillow wheels
+            install('chaquopy-libcxx') // libc++_shared.so (also resolved as a dependency)
             install('Brotli==1.0.7')
             install('lz4==4.3.2')
             install('Pillow==11.0.0')
